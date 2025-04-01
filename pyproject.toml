@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "timy"
+version = "0.1.0"
+authors = [
+  { name="Michael Karotsieris", email="michael.karotsieris@gmail.com" },
+]
+description = "A simple Pomodoro timer TUI application."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License", # Assuming MIT, change if needed
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "textual>=0.50", # Check for the latest compatible version
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/timy" # Replace with your actual URL
+"Bug Tracker" = "https://github.com/yourusername/timy/issues" # Replace with your actual URL
+
+[project.scripts]
+timy = "timy:main"
