@@ -83,7 +83,7 @@ Just run `timy` in your terminal.
 *   Check the info line below the graph for details (`<n> pomos on <Date>`).
 
 
-![Git Graph](./assets/Screenshot%202025-04-01%20at%2022.45.02.png)
+![Git Graph](./assets/graph.png)
 
 <!-- Add Screenshot: Graph Interaction -->
 *Optionally replace this with a screenshot showing graph selection.*
