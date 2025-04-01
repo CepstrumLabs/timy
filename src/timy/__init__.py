@@ -10,6 +10,7 @@ from textual.binding import Binding
 from textual.reactive import reactive
 from rich.text import Text
 from rich.style import Style
+from textual import events
 
 
 
@@ -20,14 +21,22 @@ HISTORY_FILE = HISTORY_DIR / "history.log"
 class PomodoroGraph(Static):
     """A widget to display Pomodoro history like a GitHub contribution graph."""
 
+    can_focus = True # Allow the widget to receive focus
+
     pomodoro_data = reactive(lambda: defaultdict(int), layout=True)
+    selected_col = reactive(None, layout=True) # Track selected column index
+    selected_row = reactive(None, layout=True) # Track selected row index
 
     def __init__(self, days=91, **kwargs): # Approx 3 months (13 weeks * 7 days)
         super().__init__(**kwargs)
         self.days_to_display = days
         self.styles.padding = (0, 1)
         self.styles.content_align = ("center", "middle")
-        self.load_history()
+        # self.load_history() # DO NOT call from __init__
+
+    def on_mount(self) -> None:
+        """Called when the widget is mounted. Load initial data."""
+        self.load_history() # Call load_history here
 
     def load_history(self) -> None:
         """Load Pomodoro completion data from the history file."""
@@ -42,27 +51,64 @@ class PomodoroGraph(Static):
                                 timestamp = datetime.fromisoformat(line)
                                 counts[timestamp.date()] += 1
                             except ValueError:
-                                self.app.log(f"Skipping invalid date format in history: {line}")
+                                # Use self.log now that we are mounted
+                                self.log(f"Skipping invalid date format in history: {line}")
             except OSError as e:
-                self.app.log(f"Error reading history file {HISTORY_FILE}: {e}")
+                self.log(f"Error reading history file {HISTORY_FILE}: {e}")
             except Exception as e:
-                 self.app.log(f"Unexpected error loading history: {e}")
+                 self.log(f"Unexpected error loading history: {e}")
 
         self.pomodoro_data = counts
+        # If selection is out of bounds after reload, reset it
+        max_weeks = self.days_to_display // 7 + 1
+        if self.selected_col is not None and (self.selected_col >= max_weeks or self.selected_row >= 7):
+            self.selected_col = None
+            self.selected_row = None
+            self.tooltip = None
+
         self.refresh() # Trigger a refresh to render the new data
+
+        # Defer the counter update to ensure the DOM is ready
+        def update_counter():
+            try:
+                total = self.get_total_contributions()
+                count_str = f"{total} pomo{'s' if total != 1 else ''} in the last {self.days_to_display} days"
+                counter_widget = self.app.query_one("#contrib-counter", Static)
+                counter_widget.update(count_str)
+            except Exception as e:
+                # Log error using self.log now available
+                self.log(f"Error updating contribution counter: {e}")
+
+        self.call_later(update_counter)
 
     def _get_intensity_style(self, count: int) -> Style:
         """Return a style based on the Pomodoro count for a day."""
         if count == 0:
-            return Style(color="grey30") # Dark grey for no activity
+            # Black for zero contributions
+            # Note: Empty day marker '·' has its own style in render()
+            return Style(color="#000000")
         elif count == 1:
-            return Style(color="bright_green")
-        elif count <= 3:
-            return Style(color="green")
-        elif count <= 6:
-            return Style(color="dark_green")
-        else: # > 6
-            return Style(color="green4") # Darkest green
+            return Style(color="#002000")
+        elif count == 2:
+            return Style(color="#003500")
+        elif count == 3:
+            return Style(color="#004A00")
+        elif count == 4:
+            return Style(color="#006000")
+        elif count <= 5:
+            return Style(color="#007F00")
+        elif count <= 7:
+            return Style(color="#009F00")
+        elif count <= 9:
+            return Style(color="#00BF00")
+        elif count <= 12:
+            return Style(color="#00DF00")
+        elif count <= 15:
+             # Bright green for high counts
+            return Style(color="#00FF00")
+        else: # > 15 (covers 20+)
+             # Max intensity
+            return Style(color="#00FF00")
 
     def render(self) -> Text:
         """Render a simple placeholder."""
@@ -90,8 +136,19 @@ class PomodoroGraph(Static):
             if current_date >= start_date: # Only render squares from the actual start date
                 count = self.pomodoro_data.get(current_date, 0)
                 style = self._get_intensity_style(count)
-                # Use a simple square character for now
-                grid[day_index][week_index] = ( "■", style)
+                char = "■"
+                # Check if this is the selected cell
+                is_selected = (day_index == self.selected_row and week_index == self.selected_col)
+
+                if is_selected and self.has_focus:
+                    char = "X" # Use 'X' for selected cell
+                    style += Style(reverse=True) # Invert style
+                elif count == 0:
+                    # Use a different character for empty cells for clarity
+                    char = "·"
+                    style = Style(color="grey19") # Even darker grey
+
+                grid[day_index][week_index] = (char, style)
             else:
                  # Keep cells before start_date blank
                  grid[day_index][week_index] = " "
@@ -118,6 +175,115 @@ class PomodoroGraph(Static):
             rendered_grid.append("\n")
 
         return rendered_grid
+
+    # --- Focus and Navigation --- #
+
+    def get_total_contributions(self) -> int:
+        """Calculate the total contributions within the displayed date range."""
+        today = date.today()
+        start_date = today - timedelta(days=self.days_to_display - 1)
+        total = 0
+        for d, count in self.pomodoro_data.items():
+            if start_date <= d <= today:
+                total += count
+        return total
+
+    def _get_date_from_selection(self) -> date | None:
+        """Calculate the date for the currently selected cell."""
+        if self.selected_col is None or self.selected_row is None:
+            return None
+
+        today = date.today()
+        start_date = today - timedelta(days=self.days_to_display - 1)
+        start_offset = (start_date.weekday() + 1) % 7
+        render_start_date = start_date - timedelta(days=start_offset)
+
+        try:
+            selected_date = render_start_date + timedelta(days=(self.selected_col * 7) + self.selected_row)
+            # Ensure the selected date is within the actual display range and not in the future
+            if start_date <= selected_date <= today:
+                return selected_date
+        except Exception:
+            return None # Calculation error
+        return None
+
+    def _update_tooltip(self) -> None:
+        """Update the tooltip based on the selected date."""
+        selected_date = self._get_date_from_selection()
+        count_str = ""
+        if selected_date:
+            count = self.pomodoro_data.get(selected_date, 0)
+            pomo_str = "pomo" if count == 1 else "pomos"
+            count_str = f"{count} {pomo_str} on {selected_date.strftime('%b %d, %Y')}"
+            # self.tooltip = Text(count_str) # Remove tooltip assignment
+        # else:
+            # count_str remains ""
+
+        # Update the static info widget
+        try:
+            info_widget = self.app.query_one("#selected-info", Static)
+            info_widget.update(count_str)
+        except Exception as e:
+             # Log error using self.log now available
+            self.log(f"Error updating selected info widget: {e}")
+
+    def on_focus(self, event: events.Focus) -> None:
+        """Initialize selection when focused."""
+        if self.selected_col is None or self.selected_row is None:
+            # Select the most recent day (usually today)
+            today = date.today()
+            start_date = today - timedelta(days=self.days_to_display - 1)
+            start_offset = (start_date.weekday() + 1) % 7
+            render_start_date = start_date - timedelta(days=start_offset)
+            days_diff = (today - render_start_date).days
+            self.selected_col = days_diff // 7
+            self.selected_row = days_diff % 7
+            self._update_tooltip()
+        self.refresh()
+
+    def on_blur(self, event: events.Blur) -> None:
+        """Clear selection when focus is lost."""
+        # Optional: Decide if you want to keep selection or clear it
+        # self.selected_col = None
+        # self.selected_row = None
+        # self.tooltip = None
+        self.refresh()
+
+    def on_key(self, event: events.Key) -> None:
+        """Handle arrow key navigation."""
+        if not self.has_focus:
+            return
+
+        max_weeks = self.days_to_display // 7 + 1 # Approximate number of columns
+        moved = False
+
+        if self.selected_col is None or self.selected_row is None:
+            self.on_focus(None) # Initialize if no selection
+            if self.selected_col is None: return # Still no selection, bail
+
+        current_col, current_row = self.selected_col, self.selected_row
+
+        if event.key == "up":
+            if current_row > 0:
+                self.selected_row -= 1
+                moved = True
+        elif event.key == "down":
+            if current_row < 6:
+                self.selected_row += 1
+                moved = True
+        elif event.key == "left":
+            if current_col > 0:
+                self.selected_col -= 1
+                moved = True
+        elif event.key == "right":
+            if current_col < max_weeks - 1:
+                self.selected_col += 1
+                moved = True
+
+        if moved:
+            event.stop()
+            self._update_tooltip()
+            # self.refresh() # Refresh is triggered by reactive change
 
 class TimerDisplay(Static):
     """A widget to display the current timer value."""
@@ -266,14 +432,15 @@ class PomodoroApp(App):
     #app-wrapper {
         width: auto;
         height: auto;
+        max-height: 100;
         align: center middle;
         padding: 0 4; /* Add some padding to the overall wrapper */
     }
 
     #main-container {
         width: 60;
-        height: auto;
-        border: solid green;
+        height: 24;
+        border: heavy green;
         padding: 2 4;
         margin-right: 5; /* Increase space between containers */
     }
@@ -288,6 +455,13 @@ class PomodoroApp(App):
     PomodoroGraph {
         border: heavy green;
         height: 11;
+    }
+
+    #contrib-counter {
+        margin-top: 1;
+        width: 100%;
+        text-align: center;
+        color: $text-muted;
     }
 
     #timer-display {
@@ -319,7 +493,7 @@ class PomodoroApp(App):
 
     .setting-group {
         width: auto;
-        height: 3;
+        height: 5;
         content-align: center middle;
         padding: 0 1;
     }
@@ -334,6 +508,13 @@ class PomodoroApp(App):
         padding: 0 1;
         color: $text;
     }
+
+    #selected-info {
+        margin-top: 1;
+        width: 100%;
+        height: 1;
+        text-align: center;
+    }
     """
 
     BINDINGS = [
@@ -345,7 +526,9 @@ class PomodoroApp(App):
     def __init__(self):
         super().__init__()
         self.timer_display = TimerDisplay()
-        self.pomodoro_graph = PomodoroGraph() # Instantiate the graph
+        self.pomodoro_graph = PomodoroGraph()
+        self.contribution_counter = Static(id="contrib-counter")
+        self.selected_day_info = Static(id="selected-info") # Add selected info widget
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -377,12 +560,16 @@ class PomodoroApp(App):
                 ),
                 id="main-container",
             ),
-            # Right side: Graph
+            # Right Column: Graph and Counter
             Container(
-                self.pomodoro_graph,
-                id="graph-container",
+                Vertical( # Use Vertical to stack graph and counter
+                    self.pomodoro_graph,
+                    self.contribution_counter,
+                    self.selected_day_info,
+                ),
+                id="graph-container" # ID for styling the right column
             ),
-            id="app-wrapper", # ID for the horizontal wrapper
+            id="app-wrapper" # ID for the horizontal wrapper
         )
         yield Footer()
 
