@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "timy"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
   { name="Michael Karotsieris", email="michael.karotsieris@gmail.com" },
 ]

@@ -7,3 +7,4 @@ src/timy/__pycache__/
 build/
 dist/
 __pycache__/
+.DS_Store
