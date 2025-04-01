@@ -27,7 +27,7 @@ class PomodoroGraph(Static):
     selected_col = reactive(None, layout=True) # Track selected column index
     selected_row = reactive(None, layout=True) # Track selected row index
 
-    def __init__(self, days=91, **kwargs): # Approx 3 months (13 weeks * 7 days)
+    def __init__(self, days=100, **kwargs): # Approx 3 months (13 weeks * 7 days)
         super().__init__(**kwargs)
         self.days_to_display = days
         self.styles.padding = (0, 1)
