@@ -9,18 +9,20 @@ SRC_DIR = src
 DIST_DIR = dist
 BUILD_DIR = build
 VENV_DIR = .venv
+# Find the most recently built wheel file
+WHEEL_FILE = $(shell ls -t $(DIST_DIR)/*.whl 2>/dev/null | head -n 1)
 
 # Phony targets (targets that don't represent files)
-.PHONY: all install develop clean lint test build run
+.PHONY: all install develop clean lint test build run install-pipx sdist wheel
 
 # Default target
 all: install
 
-# Installation
+# Installation (into local venv)
 install: clean $(VENV_DIR)
 	$(UV) pip install .
 
-# Development installation (editable mode)
+# Development installation (editable mode, into local venv)
 develop: clean $(VENV_DIR)
 	$(UV) pip install -e .
 
@@ -52,9 +54,20 @@ test:
 build:
 	$(UV) build
 
-# Run the application
+# Run the application (assumes it's in PATH, e.g., after install or install-pipx)
 run:
 	$(PACKAGE_NAME)
+
+# Install system-wide using pipx (recommended for CLI tools)
+install-pipx: build
+	@echo "Installing $(PACKAGE_NAME) system-wide using pipx..."
+	@if [ -z "$(WHEEL_FILE)" ]; then \
+		echo "Error: No wheel file found in $(DIST_DIR)/ after build."; \
+		exit 1; \
+	fi
+	@echo "Using wheel file: $(WHEEL_FILE)"
+	pipx install --force $(WHEEL_FILE)
+	@echo "$(PACKAGE_NAME) should now be available globally."
 
 # --- Potentially useful for packaging --- 
 
